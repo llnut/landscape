@@ -22,7 +22,8 @@ use crate::geo::ips::get_geo_ip_config_paths;
 use crate::geo::sites::get_geo_site_config_paths;
 use crate::interfaces::get_iface_paths;
 use crate::metrics::get_metric_paths;
-use crate::nat::static_mappings::get_static_nat_mapping_config_paths;
+use crate::nat::static_nat4_mappings::get_static_nat_mapping_v4_paths;
+use crate::nat::static_nat6_mappings::get_static_nat_mapping_v6_paths;
 use crate::services::client::get_client_paths;
 use crate::services::dhcp_v4::get_dhcp_v4_service_paths;
 use crate::services::firewall::get_firewall_service_paths;
@@ -183,7 +184,9 @@ pub fn build_flow_openapi_router() -> OpenApiRouter<LandscapeApp> {
 
 /// /nat — static NAT mappings
 pub fn build_nat_openapi_router() -> OpenApiRouter<LandscapeApp> {
-    OpenApiRouter::new().merge(get_static_nat_mapping_config_paths())
+    OpenApiRouter::new()
+        .merge(get_static_nat_mapping_v4_paths())
+        .merge(get_static_nat_mapping_v6_paths())
 }
 
 /// /geo — geo sites + geo IPs

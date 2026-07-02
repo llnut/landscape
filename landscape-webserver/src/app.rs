@@ -7,7 +7,8 @@ use landscape::{
     config_service::enrolled_device_service::EnrolledDeviceService,
     config_service::firewall_blacklist_service::FirewallBlacklistService,
     config_service::iface_service::IfaceManagerService,
-    config_service::static_nat_mapping_service::StaticNatMappingService,
+    config_service::static_nat4_mapping_service::StaticNat4MappingService,
+    config_service::static_nat6_mapping_service::StaticNat6MappingService,
     dns::{
         ddns_service::DdnsService, provider_profile_service::DnsProviderProfileService,
         redirect_service::DNSRedirectService, rule_service::DNSRuleService,
@@ -82,7 +83,8 @@ pub struct LandscapeApp {
     pub(crate) lan_ipv6_service: LanIPv6ManagerService,
 
     // Static NAT Mapping
-    pub(crate) static_nat_mapping_config_service: StaticNatMappingService,
+    pub(crate) static_nat4_mapping_service: StaticNat4MappingService,
+    pub(crate) static_nat6_mapping_service: StaticNat6MappingService,
 
     /// DNS Redirect Service
     pub(crate) dns_redirect_service: DNSRedirectService,

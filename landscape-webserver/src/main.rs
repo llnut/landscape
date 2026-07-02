@@ -22,7 +22,8 @@ use landscape::{
     config_service::enrolled_device_service::EnrolledDeviceService,
     config_service::firewall_blacklist_service::FirewallBlacklistService,
     config_service::iface_service::IfaceManagerService,
-    config_service::static_nat_mapping_service::StaticNatMappingService,
+    config_service::static_nat4_mapping_service::StaticNat4MappingService,
+    config_service::static_nat6_mapping_service::StaticNat6MappingService,
     dns::{
         ddns_service::DdnsService, provider_profile_service::DnsProviderProfileService,
         redirect_service::DNSRedirectService, rule_service::DNSRuleService,
@@ -361,8 +362,12 @@ async fn run_system(
 
     let ebpf_service = LandscapeEbpfService::new();
 
-    let static_nat_mapping_config_service =
-        StaticNatMappingService::new(db_store_provider.clone(), event_handle.subscribe_device())
+    let static_nat4_mapping_service =
+        StaticNat4MappingService::new(db_store_provider.clone(), event_handle.subscribe_device())
+            .await;
+
+    let static_nat6_mapping_service =
+        StaticNat6MappingService::new(db_store_provider.clone(), event_handle.subscribe_device())
             .await;
 
     let enrolled_device_service =
@@ -468,7 +473,8 @@ async fn run_system(
         // IPV6
         ipv6_pd_service,
         lan_ipv6_service,
-        static_nat_mapping_config_service,
+        static_nat4_mapping_service,
+        static_nat6_mapping_service,
         dns_redirect_service,
         dns_upstream_service,
         iface_config_service,
