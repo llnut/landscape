@@ -6,6 +6,7 @@ use landscape_common::route::{LanRouteInfo, LanRouteMode, RouteTargetInfo};
 
 use landscape_ebpf::pppoe::pppoe_handle::PppoeHandle;
 
+use crate::get_existing_linklocal;
 use crate::pppoe_client::PPPoEClientConfig;
 use crate::sys_service::route::IpRouteService;
 
@@ -281,39 +282,8 @@ pub(crate) async fn create_session(
         }
     }
 
-    let prev_linklocal_v6: Option<std::net::Ipv6Addr> = get_existing_linklocal(iface_name);
-    let mut client_linklocal_v6: Option<std::net::Ipv6Addr> = None;
-    if let Some(ref client_iface_id) = nego.ipv6cp_client_id {
-        if client_iface_id.len() == 8 {
-            let addr = iface_id_linklocal(client_iface_id);
-
-            let _ = std::process::Command::new("ip")
-                .args(&["-6", "addr", "flush", "dev", iface_name, "scope", "link"])
-                .output();
-
-            let result = std::process::Command::new("ip")
-                .args(&["-6", "addr", "add", &format!("{}/64", addr), "dev", iface_name])
-                .output();
-            match result {
-                Ok(output) if output.status.success() => {
-                    tracing::info!(iface = %iface_name, linklocal = %addr, "IPv6 link-local address set from IPv6CP");
-                    client_linklocal_v6 = Some(addr);
-                }
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::error!(
-                        "add IPv6 link-local {} on {}: {}",
-                        addr,
-                        iface_name,
-                        stderr.trim()
-                    );
-                }
-                Err(e) => {
-                    tracing::error!("add IPv6 link-local error: {e:?}");
-                }
-            }
-        }
-    }
+    let (prev_linklocal_v6, client_linklocal_v6) =
+        setup_linklocal(iface_name, nego.ipv6cp_client_id.as_deref());
 
     let dmac: [u8; 6] = lcp.server_mac[..6].try_into().expect("server MAC must be 6 bytes");
     let tmpl = landscape_ebpf::pppoe::pppoe_handle::PppoeEgressTmpl {
@@ -348,6 +318,48 @@ pub(crate) async fn create_session(
     })
 }
 
+fn setup_linklocal(
+    iface_name: &str,
+    client_iface_id: Option<&[u8]>,
+) -> (Option<std::net::Ipv6Addr>, Option<std::net::Ipv6Addr>) {
+    let prev = get_existing_linklocal(iface_name);
+    let mut new = None;
+
+    if let Some(iface_id) = client_iface_id {
+        if iface_id.len() == 8 {
+            let addr = iface_id_linklocal(iface_id);
+
+            let _ = std::process::Command::new("ip")
+                .args(&["-6", "addr", "flush", "dev", iface_name, "scope", "link"])
+                .output();
+
+            let result = std::process::Command::new("ip")
+                .args(&["-6", "addr", "add", &format!("{}/64", addr), "dev", iface_name])
+                .output();
+            match result {
+                Ok(output) if output.status.success() => {
+                    tracing::info!(iface = %iface_name, linklocal = %addr, "IPv6 link-local address set from IPv6CP");
+                    new = Some(addr);
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!(
+                        "add IPv6 link-local {} on {}: {}",
+                        addr,
+                        iface_name,
+                        stderr.trim()
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("add IPv6 link-local error: {e:?}");
+                }
+            }
+        }
+    }
+
+    (prev, new)
+}
+
 fn eui64_linklocal_from_mac(mac: &[u8]) -> std::net::Ipv6Addr {
     let a = mac[0] ^ 0x02;
     let b = mac[1];
@@ -380,18 +392,177 @@ fn iface_id_linklocal(id: &[u8]) -> std::net::Ipv6Addr {
     )
 }
 
-fn get_existing_linklocal(iface_name: &str) -> Option<std::net::Ipv6Addr> {
-    let output = std::process::Command::new("ip")
-        .args(&["-6", "addr", "show", "dev", iface_name, "scope", "link"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_IFACE: &str = "dum_test_ll";
+    const OLD_ID: [u8; 8] = [0xaa, 0x00, 0x00, 0xff, 0xfe, 0x00, 0x00, 0x01];
+    const NEW_ID: [u8; 8] = [0xbb, 0x00, 0x00, 0xff, 0xfe, 0x00, 0x00, 0x02];
+
+    fn old_addr() -> std::net::Ipv6Addr {
+        iface_id_linklocal(&OLD_ID)
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let prefix = "inet6 fe80:";
-    let line = stdout.lines().find(|l| l.trim().contains(prefix))?;
-    let field = line.split_whitespace().find(|s| s.starts_with(prefix.trim_start()))?;
-    let addr_str = field.split('/').next()?;
-    addr_str.parse().ok()
+
+    fn new_addr() -> std::net::Ipv6Addr {
+        iface_id_linklocal(&NEW_ID)
+    }
+
+    fn can_create_dummy() -> bool {
+        teardown();
+        let created = std::process::Command::new("ip")
+            .args(&["link", "add", TEST_IFACE, "type", "dummy"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("[SKIP] cannot create dummy interface (need root?)");
+            return false;
+        }
+        let up = std::process::Command::new("ip")
+            .args(&["link", "set", TEST_IFACE, "up"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !up {
+            eprintln!("[SKIP] cannot set dummy interface up");
+            teardown();
+            return false;
+        }
+        let _ = std::process::Command::new("ip")
+            .args(&["link", "set", TEST_IFACE, "addrgenmode", "none"])
+            .status();
+        true
+    }
+
+    fn setup_with_addr(addr: std::net::Ipv6Addr) -> bool {
+        std::process::Command::new("ip")
+            .args(&["-6", "addr", "add", &format!("{}/64", addr), "dev", TEST_IFACE])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn remove_addr(addr: std::net::Ipv6Addr) -> bool {
+        std::process::Command::new("ip")
+            .args(&["-6", "addr", "del", &format!("{}/64", addr), "dev", TEST_IFACE])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn teardown() {
+        let _ = std::process::Command::new("ip").args(&["link", "del", TEST_IFACE]).output();
+    }
+
+    #[test]
+    fn test_setup_linklocal_replace() {
+        if !can_create_dummy() {
+            return;
+        }
+        assert!(setup_with_addr(old_addr()), "should set old link-local");
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            Some(old_addr()),
+            "old address should be present"
+        );
+
+        let (prev, new) = setup_linklocal(TEST_IFACE, Some(&NEW_ID));
+        assert_eq!(prev, Some(old_addr()), "should return old as prev");
+        assert_eq!(new, Some(new_addr()), "should return new addr");
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            Some(new_addr()),
+            "only new link-local should remain"
+        );
+
+        teardown();
+    }
+
+    #[test]
+    fn test_setup_linklocal_no_old() {
+        if !can_create_dummy() {
+            return;
+        }
+
+        let (prev, new) = setup_linklocal(TEST_IFACE, Some(&NEW_ID));
+        assert_eq!(new, Some(new_addr()), "should set new addr");
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            Some(new_addr()),
+            "new link-local should be on interface"
+        );
+        if let Some(prev) = prev {
+            assert_ne!(prev, new_addr(), "prev should differ from new");
+        }
+
+        teardown();
+    }
+
+    #[test]
+    fn test_setup_linklocal_no_new() {
+        if !can_create_dummy() {
+            return;
+        }
+        assert!(setup_with_addr(old_addr()), "should set old link-local");
+
+        let (prev, new) = setup_linklocal(TEST_IFACE, None);
+        assert_eq!(prev, Some(old_addr()), "should capture old as prev");
+        assert_eq!(new, None, "new should be None");
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            Some(old_addr()),
+            "old address should still be present"
+        );
+
+        teardown();
+    }
+
+    #[test]
+    fn test_setup_linklocal_invalid_id() {
+        if !can_create_dummy() {
+            return;
+        }
+
+        let before = get_existing_linklocal(TEST_IFACE);
+
+        let short_id: &[u8] = &[0xaa, 0xbb];
+        let (_prev, new) = setup_linklocal(TEST_IFACE, Some(short_id));
+        assert_eq!(new, None, "new should be None for invalid id length");
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            before,
+            "interface should be unchanged for invalid id"
+        );
+
+        teardown();
+    }
+
+    #[test]
+    fn test_linklocal_restore() {
+        if !can_create_dummy() {
+            return;
+        }
+        assert!(setup_with_addr(old_addr()), "should set old link-local");
+
+        let (prev, _new) = setup_linklocal(TEST_IFACE, Some(&NEW_ID));
+        assert_eq!(prev, Some(old_addr()));
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            Some(new_addr()),
+            "new link-local should be on interface"
+        );
+
+        assert!(remove_addr(new_addr()), "should remove new addr");
+        if let Some(prev) = prev {
+            assert!(setup_with_addr(prev), "should restore old addr");
+        }
+        assert_eq!(
+            get_existing_linklocal(TEST_IFACE),
+            Some(old_addr()),
+            "old link-local should be restored"
+        );
+
+        teardown();
+    }
 }

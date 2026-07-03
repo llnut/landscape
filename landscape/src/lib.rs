@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 use futures::stream::TryStreamExt;
 use landscape_common::dev::{DevState, LandscapeInterface};
-use landscape_common::iface::config::{CreateDevType, NetworkIfaceConfig, WifiMode};
+use landscape_common::iface::config::{CreateDevType, IfaceZoneType, NetworkIfaceConfig, WifiMode};
+use tracing::error;
 
 pub mod boot;
 
@@ -28,7 +30,8 @@ pub mod sys_service;
 pub use crate::netlink::link::get_iface_by_name;
 pub use netlink::address::set_iface_ip as set_iface_ip_no_limit;
 pub use netlink::address::{
-    addresses_by_iface_id, addresses_by_iface_name, get_ppp_address, LandscapeSingleIpInfo,
+    addresses_by_iface_id, addresses_by_iface_name, get_existing_linklocal, get_ppp_address,
+    LandscapeSingleIpInfo,
 };
 pub use netlink::convert::{
     convert_link_kind, convert_link_state, convert_link_type, parse_link_message,
@@ -188,6 +191,22 @@ pub async fn init_devs(network_config: Vec<NetworkIfaceConfig>) {
                 tokio::spawn(async move {
                     netlink::ethtool::disable_gro(&ifname).await;
                 });
+            }
+
+            if matches!(ifconfig.zone_type, IfaceZoneType::Wan) {
+                if get_existing_linklocal(&ifconfig.name).is_none() {
+                    if let Some(iface) = get_iface_by_name(&ifconfig.name).await {
+                        if let Some(ref mac) = iface.mac {
+                            let ll = mac.to_ipv6_link_local();
+                            if !set_iface_ip_no_limit(&ifconfig.name, IpAddr::V6(ll), 64).await {
+                                error!(
+                                    "Failed to set link-local address {ll} on {}",
+                                    ifconfig.name
+                                );
+                            }
+                        }
+                    }
+                }
             }
 
             interface_map.remove(&ifconfig.name);

@@ -212,3 +212,19 @@ pub async fn add_address_with_handle(
         }
     }
 }
+
+pub fn get_existing_linklocal(iface_name: &str) -> Option<std::net::Ipv6Addr> {
+    let output = std::process::Command::new("ip")
+        .args(&["-6", "addr", "show", "dev", iface_name, "scope", "link"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let prefix = "inet6 fe80:";
+    let line = stdout.lines().find(|l| l.trim().contains(prefix))?;
+    let field = line.split_whitespace().find(|s| s.starts_with("fe80:"))?;
+    let addr_str = field.split('/').next()?;
+    addr_str.parse().ok()
+}

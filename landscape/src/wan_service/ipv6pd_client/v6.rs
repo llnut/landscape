@@ -16,7 +16,6 @@ use tokio::{net::UdpSocket, time::Instant};
 use crate::{
     dump::udp_packet::dhcp_v6::get_solicit_options,
     netlink::ipv6::{del_iface_ip, set_iface_ip},
-    set_iface_ip_no_limit,
     sys_service::route::IpRouteService,
 };
 
@@ -225,16 +224,6 @@ pub async fn dhcp_v6_pd_client(
         tracing::error!("bind_device error: {e:?}");
         service_status.just_change_status(ServiceStatus::Failed);
         return;
-    }
-
-    if let Some(ref mac_addr) = mac_addr {
-        let link_local = mac_addr.to_ipv6_link_local();
-        let setting_result = set_iface_ip_no_limit(&iface_name, IpAddr::V6(link_local), 64).await;
-        if !setting_result {
-            tracing::error!("DHCPv6 client: setting link_local address failed for {iface_name}");
-            service_status.just_change_status(ServiceStatus::Failed);
-            return;
-        }
     }
 
     // socket2.set_broadcast(true).unwrap();

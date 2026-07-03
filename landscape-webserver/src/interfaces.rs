@@ -1,4 +1,5 @@
 use axum::extract::{Path, State};
+use landscape::{get_existing_linklocal, get_iface_by_name, set_iface_ip_no_limit};
 use landscape_common::api_response::LandscapeApiResp as CommonApiResp;
 use landscape_common::database::LandscapeStore;
 use landscape_common::iface::{IfaceTopology, IfacesInfo};
@@ -11,6 +12,8 @@ use landscape_common::{
     iface::config::{IfaceZoneType, WifiMode},
     iface::{AddController, ChangeZone},
 };
+use std::net::IpAddr;
+use tracing::error;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -190,7 +193,22 @@ async fn change_zone(
     if let Some(config) = dhcp_v4_cleanup.as_ref() {
         state.dhcp_v4_server_service.cleanup_lingering_iface_addr_if_present(config).await;
     }
-    state.iface_config_service.change_zone(change_zone).await;
+    state.iface_config_service.change_zone(change_zone.clone()).await;
+    if matches!(change_zone.zone, IfaceZoneType::Wan) {
+        if get_existing_linklocal(&change_zone.iface_name).is_none() {
+            if let Some(iface) = get_iface_by_name(&change_zone.iface_name).await {
+                if let Some(ref mac) = iface.mac {
+                    let ll = mac.to_ipv6_link_local();
+                    if !set_iface_ip_no_limit(&change_zone.iface_name, IpAddr::V6(ll), 64).await {
+                        error!(
+                            "Failed to set link-local address {ll} on {}",
+                            change_zone.iface_name
+                        );
+                    }
+                }
+            }
+        }
+    }
     LandscapeApiResp::success(())
 }
 
