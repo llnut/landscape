@@ -13,18 +13,20 @@ use super::error::PppoeError;
 use super::lcp::LcpPhaseResult;
 use super::negotiation::NegotiationResult;
 
-pub(crate) struct EbpfHandle {
+pub(crate) struct SessionHandle {
     _pppoe_handle: PppoeHandle,
     client_ip: std::net::Ipv4Addr,
     server_ip: std::net::Ipv4Addr,
     server_mac: Vec<u8>,
     ipv6cp_server_id: Option<Vec<u8>>,
+    ipv6cp_client_linklocal: Option<std::net::Ipv6Addr>,
+    prev_ipv6_linklocal: Option<std::net::Ipv6Addr>,
     iface_name: String,
     ifindex: u32,
     default_router: bool,
 }
 
-impl EbpfHandle {
+impl SessionHandle {
     pub(crate) async fn shutdown(self, route_service: &IpRouteService) {
         let _ = std::process::Command::new("ip")
             .args(&[
@@ -62,6 +64,18 @@ impl EbpfHandle {
             }
         }
 
+        if let Some(ref linklocal) = self.ipv6cp_client_linklocal {
+            let _ = std::process::Command::new("ip")
+                .args(&["-6", "addr", "del", &format!("{}/64", linklocal), "dev", &self.iface_name])
+                .output();
+        }
+
+        if let Some(ref prev) = self.prev_ipv6_linklocal {
+            let _ = std::process::Command::new("ip")
+                .args(&["-6", "addr", "add", &format!("{}/64", prev), "dev", &self.iface_name])
+                .output();
+        }
+
         if self.default_router {
             LD_ALL_ROUTERS.del_route_by_iface(&self.iface_name).await;
         }
@@ -80,12 +94,12 @@ impl EbpfHandle {
     }
 }
 
-pub(crate) async fn setup_ebpf(
+pub(crate) async fn create_session(
     config: &PPPoEClientConfig,
     lcp: &LcpPhaseResult,
     nego: &NegotiationResult,
     route_service: &IpRouteService,
-) -> Result<EbpfHandle, PppoeError> {
+) -> Result<SessionHandle, PppoeError> {
     let mru = lcp.mru.min(config.requested_mru);
     let client_ip = nego.client_ip;
     let server_ip = nego.server_ip;
@@ -267,6 +281,40 @@ pub(crate) async fn setup_ebpf(
         }
     }
 
+    let prev_linklocal_v6: Option<std::net::Ipv6Addr> = get_existing_linklocal(iface_name);
+    let mut client_linklocal_v6: Option<std::net::Ipv6Addr> = None;
+    if let Some(ref client_iface_id) = nego.ipv6cp_client_id {
+        if client_iface_id.len() == 8 {
+            let addr = iface_id_linklocal(client_iface_id);
+
+            let _ = std::process::Command::new("ip")
+                .args(&["-6", "addr", "flush", "dev", iface_name, "scope", "link"])
+                .output();
+
+            let result = std::process::Command::new("ip")
+                .args(&["-6", "addr", "add", &format!("{}/64", addr), "dev", iface_name])
+                .output();
+            match result {
+                Ok(output) if output.status.success() => {
+                    tracing::info!(iface = %iface_name, linklocal = %addr, "IPv6 link-local address set from IPv6CP");
+                    client_linklocal_v6 = Some(addr);
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!(
+                        "add IPv6 link-local {} on {}: {}",
+                        addr,
+                        iface_name,
+                        stderr.trim()
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("add IPv6 link-local error: {e:?}");
+                }
+            }
+        }
+    }
+
     let dmac: [u8; 6] = lcp.server_mac[..6].try_into().expect("server MAC must be 6 bytes");
     let tmpl = landscape_ebpf::pppoe::pppoe_handle::PppoeEgressTmpl {
         dmac,
@@ -286,12 +334,14 @@ pub(crate) async fn setup_ebpf(
         lcp.session_id
     );
 
-    Ok(EbpfHandle {
+    Ok(SessionHandle {
         _pppoe_handle: pppoe_handle,
         client_ip,
         server_ip,
         server_mac: lcp.server_mac.clone(),
         ipv6cp_server_id: nego.ipv6cp_server_id.clone(),
+        ipv6cp_client_linklocal: client_linklocal_v6,
+        prev_ipv6_linklocal: prev_linklocal_v6,
         iface_name: iface_name.clone(),
         ifindex: index,
         default_router: config.default_router,
@@ -328,4 +378,20 @@ fn iface_id_linklocal(id: &[u8]) -> std::net::Ipv6Addr {
         ((id[4] as u16) << 8) | (id[5] as u16),
         ((id[6] as u16) << 8) | (id[7] as u16),
     )
+}
+
+fn get_existing_linklocal(iface_name: &str) -> Option<std::net::Ipv6Addr> {
+    let output = std::process::Command::new("ip")
+        .args(&["-6", "addr", "show", "dev", iface_name, "scope", "link"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let prefix = "inet6 fe80:";
+    let line = stdout.lines().find(|l| l.trim().contains(prefix))?;
+    let field = line.split_whitespace().find(|s| s.starts_with(prefix.trim_start()))?;
+    let addr_str = field.split('/').next()?;
+    addr_str.parse().ok()
 }
