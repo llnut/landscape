@@ -52,12 +52,4 @@ static __always_inline int read_route_context_v6_from_scan(struct __sk_buff *skb
 #undef BPF_LOG_TOPIC
 }
 
-static __always_inline int route_should_forward_v4(const struct route_context_v4 *context) {
-    return should_not_forward(context->daddr) ? TC_ACT_UNSPEC : TC_ACT_OK;
-}
-
-static __always_inline int route_should_forward_v6(const struct route_context_v6 *context) {
-    return is_broadcast_ip6(context->daddr.bytes);
-}
-
 #endif /* __LD_ROUTE_PACKET_H__ */

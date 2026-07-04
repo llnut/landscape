@@ -32,17 +32,6 @@ struct route_context_v6 {
     u8 smac[6];
 };
 
-#define IP_MULTICAST_MASK_NBO bpf_ntohl(0xF0000000)
-#define IP_MULTICAST_BASE_NBO bpf_ntohl(0xE0000000)
-
-static __always_inline bool should_not_forward(__be32 daddr) {
-    if (unlikely(daddr == 0xffffffff || daddr == 0)) return true;
-
-    if ((daddr & IP_MULTICAST_MASK_NBO) == IP_MULTICAST_BASE_NBO) return true;
-
-    return false;
-}
-
 static __always_inline u16 route_flow_mark_vlan_id(u32 mark_value) {
     return get_flow_vlan_id(get_flow_id(mark_value));
 }

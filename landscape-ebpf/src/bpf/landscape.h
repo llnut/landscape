@@ -206,38 +206,37 @@ static __always_inline bool is_broadcast_or_mcast_mac(const u8 dmac[6]) {
     return is_broadcast || is_ipv6_mcast;
 }
 
-static __always_inline int is_broadcast_ip4(__be32 dst) {
+#define IP_MULTICAST_MASK_NBO bpf_ntohl(0xF0000000)
+#define IP_MULTICAST_BASE_NBO bpf_ntohl(0xE0000000)
+
+static __always_inline bool is_broadcast_ip4(__be32 daddr) {
     // 255.255.255.255 or 0.0.0.0 (network byte order)
-    if (dst == 0xffffffff || dst == 0) {
-        return TC_ACT_UNSPEC;
+    if (daddr == 0xffffffff || daddr == 0) {
+        return true;
     }
-    return TC_ACT_OK;
+    if ((daddr & IP_MULTICAST_MASK_NBO) == IP_MULTICAST_BASE_NBO) {
+        return true;
+    }
+    return false;
 }
 
-static __always_inline int is_broadcast_ip6(const u8 *bytes) {
-    bool is_ipv6_broadcast = false;
-    bool is_ipv6_locallink = false;
-
+static __always_inline bool is_broadcast_ip6(const u8 *bytes) {
     __u8 first_byte = bytes[0];
 
     // IPv6 multicast ff00::/8
     if (first_byte == 0xff) {
-        is_ipv6_broadcast = true;
+        return true;
     }
 
     // IPv6 link-local fe80::/10
     if (first_byte == 0xfe) {
         __u8 second_byte = bytes[1];
-        if ((second_byte & 0xc0) == 0x80) {  // top 2 bits == 10
-            is_ipv6_locallink = true;
+        if ((second_byte & 0xc0) == 0x80) {
+            return true;
         }
     }
 
-    if (unlikely(is_ipv6_broadcast || is_ipv6_locallink)) {
-        return TC_ACT_UNSPEC;
-    } else {
-        return TC_ACT_OK;
-    }
+    return false;
 }
 
 struct inet4_addr {
@@ -339,13 +338,8 @@ static __always_inline int current_pkg_type(struct __sk_buff *skb, u32 current_l
     return TC_ACT_OK;
 }
 
-static __always_inline int is_broadcast_ip4_pair(const struct inet4_pair *ip_pair) {
-    if (is_broadcast_ip4(ip_pair->src_addr.addr)) {
-        return TC_ACT_UNSPEC;
-    } else if (is_broadcast_ip4(ip_pair->dst_addr.addr)) {
-        return TC_ACT_UNSPEC;
-    }
-    return TC_ACT_OK;
+static __always_inline bool is_broadcast_ip4_pair(const struct inet4_pair *ip_pair) {
+    return is_broadcast_ip4(ip_pair->src_addr.addr) || is_broadcast_ip4(ip_pair->dst_addr.addr);
 }
 
 #endif /* __LD_LANDSCAPE_H__ */

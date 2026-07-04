@@ -39,8 +39,9 @@ static __always_inline int tc_nat_v4_egress_do(struct __sk_buff *skb, u32 ifinde
     ret = skb_read_ipv4_info(skb, current_l3_offset, &idx, &ip_pair);
     if (ret == TC_ACT_SHOT) return TC_ACT_SHOT;
     if (ret) return TC_ACT_OK;
-    ret = is_broadcast_ip4_pair(&ip_pair);
-    if (ret != TC_ACT_OK) return TC_ACT_OK;
+    if (unlikely(is_broadcast_ip4_pair(&ip_pair))) {
+        return TC_ACT_OK;
+    }
     ret = frag4_track(&idx, ip_pair.src_addr.addr, ip_pair.dst_addr.addr, &ip_pair.src_port,
                       &ip_pair.dst_port);
     if (ret != TC_ACT_OK) return TC_ACT_SHOT;
@@ -143,8 +144,9 @@ static __always_inline int tc_nat_v4_ingress_do(struct __sk_buff *skb, u32 ifind
     ret = skb_read_ipv4_info(skb, current_l3_offset, &idx, &ip_pair);
     if (ret == TC_ACT_SHOT) return TC_ACT_SHOT;
     if (ret) return TC_ACT_OK;
-    ret = is_broadcast_ip4_pair(&ip_pair);
-    if (ret != TC_ACT_OK) return TC_ACT_OK;
+    if ((is_broadcast_ip4_pair(&ip_pair))) {
+        return TC_ACT_OK;
+    }
     ret = frag4_track(&idx, ip_pair.src_addr.addr, ip_pair.dst_addr.addr, &ip_pair.src_port,
                       &ip_pair.dst_port);
     if (ret != TC_ACT_OK) return TC_ACT_SHOT;

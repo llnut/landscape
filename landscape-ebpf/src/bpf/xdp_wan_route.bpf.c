@@ -59,15 +59,6 @@ static __always_inline int xdp_read_ipv6(struct xdp_md *ctx, struct route_contex
     return 0;
 }
 
-// ── Forwarding checks
-static __always_inline int xdp_should_forward_v4(const struct route_context_v4 *context) {
-    return should_not_forward(context->daddr) ? XDP_PASS : 0;
-}
-
-static __always_inline int xdp_should_forward_v6(const struct route_context_v6 *context) {
-    return is_broadcast_ip6(context->daddr.bytes) == TC_ACT_UNSPEC ? XDP_PASS : 0;
-}
-
 // ── is_current_wan_packet: skb->ingress_ifindex → ctx->ingress_ifindex ──
 
 static __always_inline int xdp_is_wan_packet_v4(struct xdp_md *ctx,
@@ -339,8 +330,9 @@ int xdp_wan_route_ingress(struct xdp_md *ctx) {
         struct xdp_pipe_meta meta = {};
         ret = xdp_read_ipv4(ctx, &context);
         if (ret) return ret;
-        ret = xdp_should_forward_v4(&context);
-        if (ret) return ret;
+        if (unlikely(is_broadcast_ip4(context.daddr))) {
+            return XDP_PASS;
+        }
 
         ret = xdp_is_wan_packet_v4(ctx, &context);
         if (ret) return ret;
@@ -358,8 +350,9 @@ int xdp_wan_route_ingress(struct xdp_md *ctx) {
         struct xdp_pipe_meta meta = {};
         ret = xdp_read_ipv6(ctx, &context);
         if (ret) return ret;
-        ret = xdp_should_forward_v6(&context);
-        if (ret) return ret;
+        if (unlikely(is_broadcast_ip6(context.daddr.bytes))) {
+            return XDP_PASS;
+        }
         ret = xdp_is_wan_packet_v6(ctx, &context);
         if (ret) return ret;
         xdp_get_meta(ctx, &meta);

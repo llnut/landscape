@@ -37,12 +37,16 @@ int test_route_packet(struct __sk_buff *skb) {
     if (result.scan_ret == LD_SCAN_OK) {
         if (result.offset.l3_protocol == LANDSCAPE_IPV4_TYPE) {
             result.read_ret = read_route_context_v4_from_scan(skb, &result.offset, &result.v4);
-            result.forward_ret = result.read_ret == TC_ACT_OK ? route_should_forward_v4(&result.v4)
-                                                              : result.read_ret;
+            result.forward_ret =
+                result.read_ret == TC_ACT_OK
+                    ? (is_broadcast_ip4(result.v4.daddr) ? TC_ACT_UNSPEC : TC_ACT_OK)
+                    : result.read_ret;
         } else if (result.offset.l3_protocol == LANDSCAPE_IPV6_TYPE) {
             result.read_ret = read_route_context_v6_from_scan(skb, &result.offset, &result.v6);
-            result.forward_ret = result.read_ret == TC_ACT_OK ? route_should_forward_v6(&result.v6)
-                                                              : result.read_ret;
+            result.forward_ret =
+                result.read_ret == TC_ACT_OK
+                    ? (is_broadcast_ip6(result.v6.daddr.bytes) ? TC_ACT_UNSPEC : TC_ACT_OK)
+                    : result.read_ret;
         }
     }
 

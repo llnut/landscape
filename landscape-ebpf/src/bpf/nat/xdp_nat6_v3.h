@@ -324,6 +324,8 @@ static __always_inline int xdp_ipv6_egress_prefix_check_and_replace(void *data, 
 
     u8 npt_id_mask = (u8)(wan_ip->npt_mask >> 56);
 
+    bool is_icmpx_error = idx->icmp_error_l3_offset != 0 && idx->icmp_error_inner_l4_offset != 0;
+
     struct nat_timer_value_v6 *ct_value =
         xdp_lookup_ct6_egress(mark, idx->l4_protocol, ip_pair, npt_id_mask);
     if (ct_value) {
@@ -335,7 +337,6 @@ static __always_inline int xdp_ipv6_egress_prefix_check_and_replace(void *data, 
     struct static_nat6_mapping_value *static_val =
         xdp_check_egress_static_mapping(idx->l4_protocol, ip_pair);
 
-    bool is_icmpx_error = idx->icmp_error_l3_offset != 0 && idx->icmp_error_inner_l4_offset != 0;
     bool allow_create = !is_icmpx_error && pkt_allow_initiating_ct(idx->pkt_type);
 
     if (!allow_create) {

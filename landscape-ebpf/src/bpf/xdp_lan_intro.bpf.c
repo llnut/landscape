@@ -58,16 +58,6 @@ static __always_inline int xdp_read_ipv6(struct xdp_md *ctx, struct route_contex
     return 0;
 }
 
-// ── Forwarding checks ──
-
-static __always_inline int xdp_should_forward_v4(const struct route_context_v4 *context) {
-    return should_not_forward(context->daddr) ? XDP_PASS : 0;
-}
-
-static __always_inline int xdp_should_forward_v6(const struct route_context_v6 *context) {
-    return is_broadcast_ip6(context->daddr.bytes) == TC_ACT_UNSPEC ? XDP_PASS : 0;
-}
-
 // ── XDP flow_id matching (MAC at eth->h_source, no current_l3_offset check needed) ──
 
 static __always_inline int xdp_match_flow_id_v4(struct xdp_md *ctx, __be32 saddr,
@@ -341,11 +331,15 @@ static __always_inline int xdp_cache_pick_wan_v6(struct xdp_md *ctx,
     };
     struct route_target_info_v6 *info = bpf_map_lookup_elem(&rt6_target_slot_map, &slot_key);
     if (info == NULL) {
-        if (resolved_flow_id == 0) return 0;
+        if (resolved_flow_id == 0) {
+            return 0;
+        }
         return XDP_DROP;
     }
 
-    if (info->ifindex == ctx->ingress_ifindex) return 0;
+    if (info->ifindex == ctx->ingress_ifindex) {
+        return 0;
+    }
 
     if (info->has_mac) {
         struct mac_value_v6 *mac_val = bpf_map_lookup_elem(&ip_mac_v6, &info->gate_addr);
@@ -777,8 +771,9 @@ int xdp_lan_intro(struct xdp_md *ctx) {
         ret = xdp_read_ipv4(ctx, &context);
         if (ret) return ret;
 
-        ret = xdp_should_forward_v4(&context);
-        if (ret) return ret;
+        if (unlikely(is_broadcast_ip4(context.daddr))) {
+            return XDP_PASS;
+        }
 
         u32 flow_mark = 0;
         ret = xdp_search_route_in_lan_v4(ctx, &context, &flow_mark);
@@ -799,8 +794,10 @@ int xdp_lan_intro(struct xdp_md *ctx) {
         struct route_context_v6 context = {};
         ret = xdp_read_ipv6(ctx, &context);
         if (ret) return ret;
-        ret = xdp_should_forward_v6(&context);
-        if (ret) return ret;
+
+        if (unlikely(is_broadcast_ip6(context.daddr.bytes))) {
+            return XDP_PASS;
+        }
 
         u32 flow_mark = 0;
         ret = xdp_search_route_in_lan_v6(ctx, &context, &flow_mark);

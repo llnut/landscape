@@ -339,9 +339,8 @@ int tc_wan_egress_route_v4(struct __sk_buff *skb) {
         return TC_ACT_OK;
     }
 
-    ret = route_should_forward_v4(&context);
-    if (ret != TC_ACT_OK) {
-        return ret;
+    if (unlikely(is_broadcast_ip4(context.daddr))) {
+        return TC_ACT_UNSPEC;
     }
 
     ret = tc_egress_redirect_v4(skb, current_l3_offset, &context);
@@ -384,9 +383,8 @@ int tc_wan_egress_route_v6(struct __sk_buff *skb) {
         return TC_ACT_OK;
     }
 
-    ret = route_should_forward_v6(&context);
-    if (ret != TC_ACT_OK) {
-        return ret;
+    if (unlikely(is_broadcast_ip6(context.daddr.bytes))) {
+        return TC_ACT_UNSPEC;
     }
 
     ret = tc_egress_redirect_v6(skb, current_l3_offset, &context);

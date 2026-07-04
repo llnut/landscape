@@ -38,8 +38,9 @@ static __always_inline int nat_v4_egress(struct xdp_md *ctx) {
     struct inet4_pair ip_pair = {};
     if (xdp_read_nat_info4(data, data_end, &idx, &ip_pair)) return XDP_DROP;
 
-    ret = is_broadcast_ip4_pair(&ip_pair);
-    if (ret != TC_ACT_OK) return XDP_PASS;
+    if (unlikely(is_broadcast_ip4_pair(&ip_pair))) {
+        return XDP_PASS;
+    }
 
     if (xdp_frag4_track(&idx, ip_pair.src_addr.addr, ip_pair.dst_addr.addr, &ip_pair.src_port,
                         &ip_pair.dst_port) != XDP_PASS)
@@ -157,8 +158,9 @@ static __always_inline int nat_v4_ingress(struct xdp_md *ctx) {
     struct inet4_pair ip_pair = {};
     if (xdp_read_nat_info4(data, data_end, &idx, &ip_pair)) return XDP_DROP;
 
-    ret = is_broadcast_ip4_pair(&ip_pair);
-    if (ret != TC_ACT_OK) return XDP_PASS;
+    if (unlikely(is_broadcast_ip4_pair(&ip_pair))) {
+        return XDP_PASS;
+    }
 
     if (xdp_frag4_track(&idx, ip_pair.src_addr.addr, ip_pair.dst_addr.addr, &ip_pair.src_port,
                         &ip_pair.dst_port) != XDP_PASS)

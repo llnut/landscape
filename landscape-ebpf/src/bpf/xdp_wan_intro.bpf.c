@@ -125,6 +125,10 @@ int wan_intro_dispatch(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
+        if (unlikely(is_broadcast_ip4(iph->daddr))) {
+            return XDP_PASS;
+        }
+
         key.dispatch_type = LANDSCAPE_IPV4_TYPE;
         key.v4.daddr = iph->daddr;
         wan_intro_tailcall_root(ctx, &key);
@@ -138,6 +142,10 @@ int wan_intro_dispatch(struct xdp_md *ctx) {
     if (eth->h_proto == ETH_IPV6) {
         struct ipv6hdr *ip6h = (struct ipv6hdr *)(eth + 1);
         if ((void *)(ip6h + 1) > data_end) {
+            return XDP_PASS;
+        }
+
+        if (unlikely(is_broadcast_ip6(ip6h->daddr.in6_u.u6_addr8))) {
             return XDP_PASS;
         }
 
@@ -175,12 +183,22 @@ int wan_intro_dispatch(struct xdp_md *ctx) {
         if ((void *)(ip6h + 1) > data_end) {
             return XDP_PASS;
         }
+
+        if (unlikely(is_broadcast_ip6(ip6h->daddr.in6_u.u6_addr8))) {
+            return XDP_PASS;
+        }
+
         __builtin_memcpy(&key.v6.prefix64, &ip6h->daddr, sizeof(key.v6.prefix64));
     } else {
         struct iphdr *iph = (struct iphdr *)(pppoe + 1);
         if ((void *)(iph + 1) > data_end) {
             return XDP_PASS;
         }
+
+        if (unlikely(is_broadcast_ip4(iph->daddr))) {
+            return XDP_PASS;
+        }
+
         key.v4.daddr = iph->daddr;
     }
 

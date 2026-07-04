@@ -355,9 +355,8 @@ int tc_lan_ingress_route_v4(struct __sk_buff *skb) {
         return TC_ACT_OK;
     }
 
-    ret = route_should_forward_v4(&context);
-    if (ret != TC_ACT_OK) {
-        return ret;
+    if (unlikely(is_broadcast_ip4(context.daddr))) {
+        return TC_ACT_UNSPEC;
     }
 
     ret = search_route_in_lan_v4(skb, current_l3_offset, &context, &flow_mark);
@@ -409,9 +408,8 @@ int tc_lan_ingress_route_v6(struct __sk_buff *skb) {
         return TC_ACT_OK;
     }
 
-    ret = route_should_forward_v6(&context);
-    if (ret != TC_ACT_OK) {
-        return ret;
+    if (unlikely(is_broadcast_ip6(context.daddr.bytes))) {
+        return TC_ACT_UNSPEC;
     }
 
     ret = search_route_in_lan_v6(skb, current_l3_offset, &context, &flow_mark);
